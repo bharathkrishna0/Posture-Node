@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SitSense - Edge AI Posture Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-green: #10b981;
+            --accent-yellow: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        h1 { margin: 0; font-size: 1.8rem; font-weight: 700; }
+        h1 span { color: var(--accent-blue); }
+        #connectBtn {
+            padding: 10px 24px; font-size: 1rem; font-weight: 600; border: none;
+            border-radius: 8px; cursor: pointer; background-color: var(--accent-blue);
+            color: white; transition: all 0.2s;
+        }
+        #connectBtn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
+        #connectBtn.connected { background-color: var(--accent-green); }
+        .dashboard-grid {
+            display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+            gap: 20px; flex: 1; min-height: 0;
+        }
+        .card {
+            background-color: var(--card-bg); border-radius: 12px; padding: 20px;
+            display: flex; flex-direction: column; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .card-title {
+            font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px;
+            color: var(--text-secondary); margin-bottom: 15px; font-weight: 600;
+        }
+        #visual-card { grid-row: 1 / 3; }
+        #three-container { flex: 1; position: relative; border-radius: 8px; overflow: hidden; background: #000; }
+        #status-overlay {
+            position: absolute; top: 15px; left: 15px; padding: 8px 16px;
+            border-radius: 20px; font-weight: 700; font-size: 0.9rem; z-index: 10;
+            transition: background 0.5s;
+        }
+        .status-good { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); }
+        .status-warn { background: rgba(245, 158, 11, 0.2); color: var(--accent-yellow); border: 1px solid var(--accent-yellow); }
+        .status-bad  { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); }
+        .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .metric-box { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; text-align: center; }
+        .metric-val { font-size: 2rem; font-weight: 700; }
+        .metric-label { font-size: 0.8rem; color: var(--text-secondary); margin-top: 5px; }
+        #chart-container { flex: 1; position: relative; }
+        #ai-feedback {
+            flex: 1; background: rgba(59, 130, 246, 0.1); border-left: 4px solid var(--accent-blue);
+            padding: 20px; border-radius: 0 8px 8px 0; font-size: 1.1rem; line-height: 1.6;
+            overflow-y: auto; display: flex; align-items: center;
+        }
+        #ai-feedback .icon { font-size: 2rem; margin-right: 15px; }
+        #debug-line { font-size: 0.75rem; color: var(--text-secondary); margin-top: 10px; font-family: monospace; word-break: break-all; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Sit<span>Sense</span> AI</h1>
+        <button id="connectBtn">Connect to Chair</button>
+    </header>
+
+    <div class="dashboard-grid">
+        <div class="card" id="visual-card">
+            <div class="card-title">Real-Time Spinal Kinematics</div>
+            <div id="three-container">
+                <div id="status-overlay" class="status-good">POSTURE: GOOD</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Live Telemetry</div>
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-val" id="pitch-val">0.0°</div>
+                    <div class="metric-label">Pitch (Slouch)</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-val" id="roll-val">0.0°</div>
+                    <div class="metric-label">Roll (Lean)</div>
+                </div>
+            </div>
+            <div class="card-title" style="margin-top:10px;">Temporal Fatigue Tracking</div>
+            <div id="chart-container">
+                <canvas id="postureChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Ergonomic AI Assistant</div>
+            <div style="display:flex; flex-direction:column; flex:1;">
+                <div id="ai-feedback">
+                    <div class="icon">🧠</div>
+                    <div id="feedback-text">Waiting for sensor connection... Ensure the SitSense node is powered on and click 'Connect'.</div>
+                </div>
+                <div id="debug-line">Raw: --</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== 1. WEB BLUETOOTH CONNECTION (Nordic UART Service) =====
+        const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+        const NUS_TX_CHAR = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // notify: device -> web
+
+        let device, server, nusService, txChar;
+        let bleBuffer = "";
+
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                document.getElementById('connectBtn').innerText = "Scanning...";
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [NUS_SERVICE] }],
+                    optionalServices: [NUS_SERVICE]
+                });
+
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+                server = await device.gatt.connect();
+                nusService = await server.getPrimaryService(NUS_SERVICE);
+                txChar = await nusService.getCharacteristic(NUS_TX_CHAR);
+
+                txChar.addEventListener('characteristicvaluechanged', onDataReceived);
+                await txChar.startNotifications();
+
+                document.getElementById('connectBtn').innerText = "Connected";
+                document.getElementById('connectBtn').classList.add('connected');
+                updateFeedback("✅ Connected to SitSense node. Monitoring posture...", "info");
+            } catch (error) {
+                console.error(error);
+                document.getElementById('connectBtn').innerText = "Connect to Chair";
+                updateFeedback("❌ Connection failed: " + error.message, "error");
+            }
+        });
+
+        function onDisconnected() {
+            document.getElementById('connectBtn').innerText = "Connect to Chair";
+            document.getElementById('connectBtn').classList.remove('connected');
+            updateFeedback("⚠️ Device disconnected. Please reconnect.", "warn");
+        }
+
+        function onDataReceived(event) {
+            const decoder = new TextDecoder();
+            bleBuffer += decoder.decode(event.target.value);
+            let lines = bleBuffer.split('\n');
+            bleBuffer = lines.pop();
+            for (let line of lines) {
+                if (line.trim() !== '') parseData(line.trim());
+            }
+        }
+
+        // ===== 2. PARSE FIRMWARE DATA & COMPUTE PITCH/ROLL =====
+        // Firmware sends: "A:ax,ay,az G:gx,gy,gz"
+        let currentPitch = 0, currentRoll = 0;
+        let slouchTimer = 0;
+        let currentState = "GOOD";
+
+        const PITCH_WARN = 20.0;
+        const PITCH_BAD = 35.0;
+        const ROLL_WARN = 15.0;
+        const TIME_TO_FATIGUE = 10000;
+
+        function parseData(str) {
+            document.getElementById('debug-line').innerText = "Raw: " + str;
+
+            const match = str.match(
+                /A:([-\d.]+),([-\d.]+),([-\d.]+)\s*G:([-\d.]+),([-\d.]+),([-\d.]+)/
+            );
+            if (!match) return;
+
+            const ax = parseFloat(match[1]);
+            const ay = parseFloat(match[2]);
+            const az = parseFloat(match[3]);
+
+            // Compute pitch/roll from accelerometer vector.
+            // Adjust axis mapping if your board is mounted differently.
+            const pitchRad = Math.atan2(-ax, Math.sqrt(ay * ay + az * az));
+            const rollRad  = Math.atan2(ay, az);
+
+            currentPitch = pitchRad * (180 / Math.PI);
+            currentRoll  = rollRad  * (180 / Math.PI);
+
+            updateUI();
+            updateStateMachine();
+        }
+
+        function updateStateMachine() {
+            const dt = 1000; // firmware samples ~1/sec
+            let newState = "GOOD";
+
+            if (Math.abs(currentPitch) > PITCH_BAD || Math.abs(currentRoll) > ROLL_WARN * 2) {
+                newState = "FATIGUED";
+            } else if (Math.abs(currentPitch) > PITCH_WARN || Math.abs(currentRoll) > ROLL_WARN) {
+                newState = "WARNING";
+            }
+
+            if (newState === "WARNING") {
+                slouchTimer += dt;
+                if (slouchTimer > TIME_TO_FATIGUE) newState = "FATIGUED";
+            } else {
+                slouchTimer = Math.max(0, slouchTimer - dt * 2);
+            }
+
+            if (currentState !== newState) {
+                currentState = newState;
+                triggerFeedback(newState);
+            }
+        }
+
+        function triggerFeedback(state) {
+            const overlay = document.getElementById('status-overlay');
+            overlay.className = '';
+
+            if (state === "GOOD") {
+                overlay.classList.add('status-good');
+                overlay.innerText = "POSTURE: GOOD";
+                updateFeedback("Great job! Your spinal alignment is neutral. Keep up the good posture.", "good");
+            } else if (state === "WARNING") {
+                overlay.classList.add('status-warn');
+                overlay.innerText = "POSTURE: WARNING";
+                if (Math.abs(currentPitch) > PITCH_WARN) {
+                    updateFeedback("You are starting to slouch forward. Try pulling your shoulders back and aligning your ears over your shoulders.", "warn");
+                } else {
+                    updateFeedback("You are leaning to one side. Try to distribute your weight evenly across the chair to prevent lateral spinal asymmetry.", "warn");
+                }
+            } else if (state === "FATIGUED") {
+                overlay.classList.add('status-bad');
+                overlay.innerText = "POSTURE: FATIGUED";
+                updateFeedback("⚠️ Prolonged poor posture detected. Your core muscles are likely fatigued. Please stand up, stretch for 30 seconds, and reset your seating position.", "bad");
+            }
+        }
+
+        function updateFeedback(text, type) {
+            const el = document.getElementById('feedback-text');
+            el.innerText = text;
+            const colors = { good: '#10b981', warn: '#f59e0b', bad: '#ef4444', info: '#3b82f6', error: '#ef4444' };
+            el.style.color = colors[type] || 'white';
+        }
+
+        // ===== 3. UI UPDATES (Metrics & Charts) =====
+        const pitchChartCtx = document.getElementById('postureChart').getContext('2d');
+        const MAX_POINTS = 100;
+        let chartLabels = Array(MAX_POINTS).fill('');
+        let pitchData = Array(MAX_POINTS).fill(0);
+        let rollData = Array(MAX_POINTS).fill(0);
+
+        const postureChart = new Chart(pitchChartCtx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [
+                    { label: 'Pitch (Slouch)', data: pitchData, borderColor: '#3b82f6',
+                      backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true },
+                    { label: 'Roll (Lean)', data: rollData, borderColor: '#8b5cf6',
+                      backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    y: { min: -60, max: 60, grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#94a3b8' } },
+                    x: { display: false, grid: { display: false } }
+                },
+                plugins: { legend: { labels: { color: '#f8fafc' } } }
+            }
+        });
+
+        function updateUI() {
+            document.getElementById('pitch-val').innerText = currentPitch.toFixed(1) + '°';
+            document.getElementById('roll-val').innerText = currentRoll.toFixed(1) + '°';
+
+            pitchData.push(currentPitch);
+            rollData.push(currentRoll);
+            if (pitchData.length > MAX_POINTS) {
+                pitchData.shift();
+                rollData.shift();
+            }
+            postureChart.update();
+
+            update3DModel();
+        }
+
+        // ===== 4. THREE.JS 3D VISUALIZATION =====
+        let scene, camera, renderer, torsoMesh;
+
+        function init3D() {
+            const container = document.getElementById('three-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+
+            camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+            camera.position.set(0, 0, 5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            container.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 5, 5);
+            scene.add(dirLight);
+
+            const geometry = new THREE.BoxGeometry(1.5, 2.5, 0.8);
+            const materials = [
+                new THREE.MeshStandardMaterial({ color: 0x3b82f6 }),
+                new THREE.MeshStandardMaterial({ color: 0x3b82f6 }),
+                new THREE.MeshStandardMaterial({ color: 0x1e40af }),
+                new THREE.MeshStandardMaterial({ color: 0x1e293b }),
+                new THREE.MeshStandardMaterial({ color: 0x60a5fa }),
+                new THREE.MeshStandardMaterial({ color: 0x1e293b })
+            ];
+            torsoMesh = new THREE.Mesh(geometry, materials);
+            scene.add(torsoMesh);
+
+            const gridHelper = new THREE.GridHelper(10, 10, 0x334155, 0x1e293b);
+            gridHelper.rotation.x = Math.PI / 2;
+            gridHelper.position.z = -1;
+            scene.add(gridHelper);
+
+            animate3D();
+        }
+
+        function update3DModel() {
+            if (!torsoMesh) return;
+            const pitchRad = THREE.MathUtils.degToRad(currentPitch);
+            const rollRad = THREE.MathUtils.degToRad(currentRoll);
+
+            torsoMesh.rotation.x += (pitchRad - torsoMesh.rotation.x) * 0.2;
+            torsoMesh.rotation.z += (-rollRad - torsoMesh.rotation.z) * 0.2;
+
+            const frontMat = torsoMesh.material[4];
+            if (currentState === "GOOD") frontMat.color.setHex(0x10b981);
+            else if (currentState === "WARNING") frontMat.color.setHex(0xf59e0b);
+            else if (currentState === "FATIGUED") frontMat.color.setHex(0xef4444);
+        }
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            const container = document.getElementById('three-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        });
+
+        window.onload = init3D;
+    </script>
+</body>
+</html>
