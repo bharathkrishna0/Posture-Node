@@ -1,0 +1,17 @@
+/ {
+	aliases {
+		imu0 = &xiao_i2c;
+	};
+};
+&uart21 {
+    status = "disabled";
+};
+&xiao_i2c {
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+&pdm_imu_pwr {
+    regulator-boot-on;
+    status = "okay";
+};
